@@ -1,15 +1,22 @@
-# Upload Service Microservice
+# S3 Upload Proxy Microservice
 
-This is a Node.js (Express.js) microservice that acts as an intermediary for uploading files to S3-compatible storage services like Wasabi, AWS S3, etc. It generates presigned URLs for secure, direct client-side uploads.
+This is a Node.js (Express.js) microservice that acts as a secure and efficient intermediary for uploading files to S3-compatible storage.
+
+Instead of generating S3 credentials, this service receives a pre-generated S3 presigned URL and provides a temporary, local proxy URL. The client then uploads the file to the microservice, which streams it asynchronously to S3. This approach enhances security by hiding the final S3 URL from the client and allows for server-side validation and control.
+
+## Core Workflow
+
+1.  **Generate Proxy URL**: Your backend generates an S3 presigned URL and sends it to this microservice's `/generate` endpoint. The microservice stores this URL and returns a temporary, unique proxy URL (e.g., `/upload/some-unique-id`).
+2.  **Client Upload**: The client uploads the file directly to the proxy URL provided in step 1.
+3.  **Proxy and Webhook**: The microservice receives the file, immediately confirms receipt to the client (`200 OK`), and begins streaming the file to the S3 presigned URL in the background. Once the background upload is complete (or fails), it sends a status notification to your backend via a webhook.
 
 ## Features
 
--   **Generate Presigned URLs**: Creates a temporary, secure URL for a client to upload a file directly to the S3 bucket.
--   **Verify File Existence**: Checks if a file exists in the bucket and returns its metadata.
--   **Delete Files**: Deletes a specified file from the bucket.
--   **Webhook Notifications**: Sends success or error notifications to a specified webhook URL.
--   **Validation**: Enforces required fields and file size limits.
--   **Structured Error Handling**: Provides clear, structured error messages.
+-   **Asynchronous Upload Proxy**: Decouples the client from the S3 upload process.
+-   **Streaming**: Handles large files with low memory overhead by streaming data instead of storing it.
+-   **In-Memory Session Management**: Temporarily tracks upload sessions (for production, use Redis or similar).
+-   **Dynamic Validation**: Enforces file size limits specified during URL generation.
+-   **Webhook Notifications**: Informs your backend about the final status of the S3 upload.
 
 ## Prerequisites
 
@@ -21,17 +28,13 @@ This is a Node.js (Express.js) microservice that acts as an intermediary for upl
 1.  **Clone the repository:**
     ```bash
     git clone <repository-url>
-    cd upload-service
+    cd s3-upload-proxy
     ```
 
 2.  **Install dependencies:**
     ```bash
     npm install
     ```
-
-## Configuration
-
-No `.env` file is needed for this service. All S3 credentials and configuration details are passed directly in the body of each API request, allowing this service to be a stateless intermediary for multiple S3 buckets and accounts.
 
 ## Running the Service
 
@@ -45,29 +48,22 @@ The server will start on port `3000` by default.
 
 ## API Endpoints
 
-All endpoints are prefixed with `/api/v1/s3`.
+All endpoints are prefixed with `/api/v1`.
 
 ---
 
-### 1. `POST /upload`
+### 1. `POST /generate`
 
-Generates a presigned URL for a client to upload a file.
+Registers a new upload session and generates a temporary proxy URL.
 
 **Request Body:**
 
 ```json
 {
-  "fileName": "exemplo.png",
-  "fileSize": 123456,
-  "fileType": "image/png",
-  "s3": {
-    "accessKeyId": "YOUR_S3_ACCESS_KEY",
-    "secretAccessKey": "YOUR_S3_SECRET_KEY",
-    "bucket": "your-bucket-name",
-    "region": "us-east-1",
-    "endpoint": "https://s3.wasabisys.com"
-  },
-  "webhook": "https://your-server.com/webhook"
+  "fileKey": "uploads/user/avatar.png",
+  "maxSize": 10485760,
+  "s3PresignedUrl": "https://your-bucket.s3.wasabisys.com/...?signature...",
+  "webhook": "https://your-backend.com/webhook/upload-confirm"
 }
 ```
 
@@ -76,112 +72,49 @@ Generates a presigned URL for a client to upload a file.
 ```json
 {
   "status": "success",
-  "uploadUrl": "https://s3.wasabisys.com/your-bucket-name/uploads/uuid-exemplo.png?AWSAccessKeyId=...",
-  "fileKey": "uploads/uuid-exemplo.png"
+  "uploadUrl": "http://localhost:3000/api/v1/upload/a1b2c3d4-e5f6-...",
+  "fileKey": "uploads/user/avatar.png"
+}
+```
+
+---
+
+### 2. `POST /upload/:id`
+
+The endpoint where the client uploads the file using `multipart/form-data`.
+
+**Request:**
+
+The client should send a `POST` request with the file in the body as `multipart/form-data`.
+
+**Success Response (200 OK):**
+
+The client receives this response *immediately* after the file is received by the proxy service. The upload to S3 continues in the background.
+
+```json
+{
+  "status": "success",
+  "message": "Upload received and is being processed."
 }
 ```
 
 **Webhook Payloads:**
 
--   **On Success:** A `200 OK` response is sent to the client, and this webhook is triggered.
+After the background upload to S3 is complete, the microservice sends one of the following payloads to the `webhook` URL provided during the `/generate` call.
+
+-   **On Success:**
     ```json
     {
       "status": "success",
-      "fileName": "exemplo.png",
-      "fileKey": "uploads/uuid-exemplo.png",
-      "fileSize": 123456,
-      "bucket": "your-bucket-name"
+      "fileKey": "uploads/user/avatar.png",
+      "size": 987654
     }
     ```
--   **On Error:** A `500` or `400` response is sent to the client, and this webhook is triggered.
+-   **On Error:**
     ```json
     {
       "status": "error",
-      "error": "Detailed error message",
-      "fileName": "exemplo.png"
+      "fileKey": "uploads/user/avatar.png",
+      "error": "S3 upload failed: Request failed with status code 403"
     }
     ```
-
----
-
-### 2. `POST /verify`
-
-Verifies if a file exists in the bucket and returns its metadata.
-
-**Request Body:**
-
-```json
-{
-  "fileKey": "uploads/uuid-exemplo.png",
-  "s3": {
-    "accessKeyId": "YOUR_S3_ACCESS_KEY",
-    "secretAccessKey": "YOUR_S3_SECRET_KEY",
-    "bucket": "your-bucket-name",
-    "region": "us-east-1",
-    "endpoint": "https://s3.wasabisys.com"
-  }
-}
-```
-
-**Success Response (200 OK):**
-
-```json
-{
-  "status": "success",
-  "metadata": {
-    "ETag": "\"d41d8cd98f00b204e9800998ecf8427e\"",
-    "LastModified": "2023-10-27T10:00:00.000Z",
-    "Size": 123456
-  }
-}
-```
-
-**Error Response (404 Not Found):**
-
-```json
-{
-  "statusCode": 404,
-  "error": "Not Found",
-  "message": "File not found"
-}
-```
-
----
-
-### 3. `DELETE /file`
-
-Deletes a file from the S3 bucket.
-
-**Request Body:**
-
-```json
-{
-  "fileKey": "uploads/uuid-exemplo.png",
-  "s3": {
-    "accessKeyId": "YOUR_S3_ACCESS_KEY",
-    "secretAccessKey": "YOUR_S3_SECRET_KEY",
-    "bucket": "your-bucket-name",
-    "region": "us-east-1",
-    "endpoint": "https://s3.wasabisys.com"
-  }
-}
-```
-
-**Success Response (200 OK):**
-
-```json
-{
-  "status": "success",
-  "message": "File deleted successfully"
-}
-```
-
-**Error Response (500 Internal Server Error):**
-
-```json
-{
-  "status": "error",
-  "message": "Failed to delete file",
-  "details": "..."
-}
-```

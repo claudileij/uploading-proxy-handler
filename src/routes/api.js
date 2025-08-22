@@ -1,9 +1,9 @@
 const express = require('express');
-const s3Routes = require('./s3.routes');
+const proxyRoutes = require('./proxy.routes');
 
 const router = express.Router();
 
-// Mount S3 routes
-router.use('/s3', s3Routes);
+// Mount Proxy routes
+router.use('/', proxyRoutes); // Mount at the root of /api/v1
 
 module.exports = router;
