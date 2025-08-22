@@ -7,6 +7,7 @@ const generateSchema = Joi.object({
   maxSize: Joi.number().integer().min(1).required(),
   s3PresignedUrl: Joi.string().uri().required(),
   webhook: Joi.string().uri().optional(),
+  type: Joi.string().valid('put', 'multipart').default('multipart'),
 });
 
 module.exports = { generateSchema };

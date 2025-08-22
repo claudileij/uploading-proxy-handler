@@ -8,7 +8,7 @@ const uploadStore = require('../services/upload.store');
 const generate = async (req, res, next) => {
   try {
     const id = uuidv4();
-    const { fileKey, maxSize, s3PresignedUrl, webhook } = req.body;
+    const { fileKey, maxSize, s3PresignedUrl, webhook, type } = req.body;
     console.log(req.body)
     // Store the upload details
     uploadStore.add(id, {
@@ -17,6 +17,7 @@ const generate = async (req, res, next) => {
       s3PresignedUrl,
       webhook,
       status: 'pending',
+      type,
     });
 
     // Construct the upload URL for the client
