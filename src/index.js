@@ -2,11 +2,13 @@ const express = require('express');
 const morgan = require('morgan');
 const apiRoutes = require('./routes/api');
 const { logErrors, errorHandler, boomErrorHandler } = require('./middlewares/error.handler');
-
+const cors = require('cors')
 const app = express();
 const port = process.env.PORT || 3000;
 
 // Middleware for logging requests
+app.use(cors());
+
 app.use(morgan('dev'));
 
 // Middleware for parsing JSON bodies
