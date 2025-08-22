@@ -9,7 +9,7 @@ const generate = async (req, res, next) => {
   try {
     const id = uuidv4();
     const { fileKey, maxSize, s3PresignedUrl, webhook } = req.body;
-
+    console.log(req.body)
     // Store the upload details
     uploadStore.add(id, {
       fileKey,
@@ -20,13 +20,13 @@ const generate = async (req, res, next) => {
     });
 
     // Construct the upload URL for the client
-    const uploadUrl = `${req.protocol}://${req.get('host')}/api/v1/upload/${id}`;
-
-    res.status(200).json({
-      status: 'success',
-      uploadUrl,
-      fileKey,
-    });
+    const uploadUrl = `https://${req.get('host')}/api/v1/upload/${id}`;
+    const uploadDetails = {
+        status: 'success',
+        uploadUrl,
+        fileKey,
+      }
+    res.status(200).json(uploadDetails);
   } catch (error) {
     next(boom.badImplementation('Could not generate upload URL', error));
   }
